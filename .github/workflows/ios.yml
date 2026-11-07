@@ -38,7 +38,16 @@ jobs:
           flutter --version
           flutter pub get
           flutter build ios --release --no-codesign --config-only
-      - run: python3 ios-distribution/scripts/distribute.py build
+      - name: Build unsigned IPA
+        run: |
+          set -o pipefail
+          python3 ios-distribution/scripts/distribute.py build 2>&1 | tee .ios-build-log.txt
+      # Job logs need a signed-in viewer; annotations are public, so surface the cause there.
+      - name: Report build errors
+        if: failure()
+        run: |
+          grep -E "error:|Error:|ValueError|requires|not found" .ios-build-log.txt | grep -v "^\+" | tail -n 10 | sed 's/^/::error::/' || true
+          tail -n 10 .ios-build-log.txt | sed 's/^/::warning::/'
       - uses: actions/upload-artifact@v4
         with:
           name: ios-package

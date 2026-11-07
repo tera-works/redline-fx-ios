@@ -52,3 +52,4 @@ dist/
 site/
 .ios-build/
 __pycache__/
+.ios-build-log.txt
