@@ -55,6 +55,20 @@ def inspect_ipa(path):
         return info
 
 
+def strip_signatures(app):
+    """Prebuilt frameworks (e.g. Flutter.framework) arrive signed even with signing disabled.
+    AltStore re-signs every bundle on install, so remove the old signatures from the packaged copy."""
+    for sig in sorted(app.rglob('_CodeSignature'), key=lambda p: len(p.parts), reverse=True):
+        bundle = sig.parent
+        plist = bundle / 'Info.plist'
+        exe = plistlib.loads(plist.read_bytes()).get('CFBundleExecutable') if plist.is_file() else None
+        if exe and (bundle / exe).is_file():
+            run('codesign', '--remove-signature', bundle / exe)
+        shutil.rmtree(sig)
+    for profile in app.rglob('embedded.mobileprovision'):
+        profile.unlink()
+
+
 def build(c):
     require(os.sys.platform == 'darwin', 'build requires macOS and Xcode; use GitHub Actions')
     if c.get('xcodePath'):
@@ -100,6 +114,7 @@ def build(c):
     require(not payload.exists(), 'Package directory already exists')
     payload.mkdir(parents=True)
     run('ditto', app, payload / app.name)
+    strip_signatures(payload / app.name)
     ipa = dist / 'app.ipa'
     run('ditto', '-c', '-k', '--keepParent', '--norsrc', payload, ipa.resolve())
     info = inspect_ipa(ipa)

@@ -50,6 +50,20 @@ class DistributionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'device'):
                 d.inspect_ipa(path)
 
+    def test_prebuilt_signatures_stripped(self):
+        # A framework without an executable is only cleaned up (codesign is macOS-only).
+        with tempfile.TemporaryDirectory() as tmp:
+            app = Path(tmp) / 'Test.app'
+            sig = app / 'Frameworks/Flutter.framework/_CodeSignature'
+            sig.mkdir(parents=True)
+            (sig / 'CodeResources').write_bytes(b'fixture')
+            (app / 'embedded.mobileprovision').write_bytes(b'fixture')
+            (app / 'Test').write_bytes(b'fixture')
+            d.strip_signatures(app)
+            self.assertFalse(sig.exists())
+            self.assertFalse((app / 'embedded.mobileprovision').exists())
+            self.assertTrue((app / 'Test').exists())
+
 
 if __name__ == '__main__':
     unittest.main()
