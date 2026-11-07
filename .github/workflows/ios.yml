@@ -1,0 +1,81 @@
+name: iOS distribution
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      rebuild_source:
+        description: Rebuild Pages from published release manifests (no build)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: ios-distribution-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: ${{ !inputs.rebuild_source }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Flutter app: the Xcode workspace needs Flutter's generated config (Generated.xcconfig,
+      # plugin packages) before xcodebuild. Flutter comes from the official repository at the
+      # version the app is developed with, so no third-party Action is needed.
+      - name: Set up Flutter
+        run: |
+          git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+        env:
+          FLUTTER_VERSION: 3.47.5
+      - name: Prepare the Flutter iOS project
+        run: |
+          flutter --version
+          flutter pub get
+          flutter build ios --release --no-codesign --config-only
+      - run: python3 ios-distribution/scripts/distribute.py build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-package
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    needs: build
+    if: ${{ !cancelled() && ((needs.build.result == 'success' && startsWith(github.ref, 'refs/tags/v')) || (inputs.rebuild_source && github.ref == 'refs/heads/main')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        if: ${{ !inputs.rebuild_source }}
+        with:
+          name: ios-package
+          path: dist
+      - run: python3 ios-distribution/scripts/distribute.py publish
+        if: ${{ !inputs.rebuild_source }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: python3 ios-distribution/scripts/distribute.py source
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - uses: actions/deploy-pages@v4
+        id: deployment
